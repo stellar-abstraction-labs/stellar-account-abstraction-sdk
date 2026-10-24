@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sdk-build:
+    name: SDK Build & Dist Freshness Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: stellar-social-sdk
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Build SDK
+        run: npm run build
+
+      - name: Fail when committed dist/ is stale
+        run: |
+          if ! git diff --exit-code -- dist/; then
+            echo "::error::Committed stellar-social-sdk/dist/ is stale! The following files differ after running npm run build:"
+            git diff --name-only -- dist/ | sed 's/^/  - stellar-social-sdk\//'
+            exit 1
+          fi
+
+      - name: Exercise stale dist/ check against unbuilt src/config.ts edit
+        run: |
+          cp src/config.ts src/config.ts.bak
+          sed -i 's/CALZGCSB3P3WEBLW3QTF5Y4WEALEVTYUYBC7KBGQ266GDINT7U4E74KW/STALE_TEST_CONTRACT_ID/' src/config.ts
+          npm run build
+          if git diff --exit-code -- dist/ >/dev/null 2>&1; then
+            echo "::error::Expected stale dist check to fail when src/config.ts is edited without committing rebuilt dist/"
+            mv src/config.ts.bak src/config.ts
+            exit 1
+          fi
+          echo "Verified stale check fails and names stale files:"
+          git diff --name-only -- dist/ | sed 's/^/  - stellar-social-sdk\//'
+          mv src/config.ts.bak src/config.ts
+          npm run build
+          git diff --exit-code -- dist/
